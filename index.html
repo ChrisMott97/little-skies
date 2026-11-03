@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>little skies</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="vignette"></div>
+    <div id="grain"></div>
+    <div id="fade"></div>
+
+    <div id="title">
+      <h1>little skies</h1>
+      <p>press <kbd>W</kbd> to open the throttle, <kbd>↓</kbd> to lift off</p>
+    </div>
+
+    <div id="hud" class="card">
+      <div class="row"><span>speed</span><b id="hud-speed">0</b><i>kt</i></div>
+      <div class="row"><span>altitude</span><b id="hud-alt">0</b><i>m</i></div>
+      <div class="row"><span>throttle</span><div class="bar"><div id="hud-thr"></div></div></div>
+    </div>
+
+    <div id="toast"></div>
+
+    <div id="help" class="card">
+      <h2>controls</h2>
+      <ul>
+        <li><kbd>↑</kbd><kbd>↓</kbd> nose down / up</li>
+        <li><kbd>←</kbd><kbd>→</kbd> roll</li>
+        <li><kbd>W</kbd><kbd>S</kbd> throttle</li>
+        <li><kbd>A</kbd><kbd>D</kbd> rudder &amp; taxi steering</li>
+        <li><kbd>space</kbd> brakes</li>
+        <li><span class="mouse">drag</span> look around · <span class="mouse">scroll</span> zoom</li>
+        <li><kbd>C</kbd> camera · <kbd>I</kbd> invert pitch</li>
+        <li><kbd>T</kbd> into the sky · <kbd>return</kbd> airfield</li>
+        <li><kbd>G</kbd> let a few hours pass</li>
+        <li><kbd>M</kbd> sound · <kbd>N</kbd> music · <kbd>P</kbd> pause · <kbd>H</kbd> hide this</li>
+      </ul>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
