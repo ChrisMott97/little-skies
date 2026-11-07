@@ -19,6 +19,7 @@ export const TUNING = {
   steerRate: 0.9, // taxi steering
   inputSmoothing: 7, // how quickly controls respond
   throttleRate: 0.55, // throttle change per second
+  leverRate: 1.2, // how fast the engine follows the touch throttle lever
 };
 
 const _fwd = new THREE.Vector3();
@@ -78,7 +79,12 @@ export class FlightModel {
     this.pitchIn = damp(this.pitchIn, input.pitch, T.inputSmoothing, dt);
     this.rollIn = damp(this.rollIn, input.roll, T.inputSmoothing, dt);
     this.yawIn = damp(this.yawIn, input.yaw, T.inputSmoothing, dt);
-    this.throttle = THREE.MathUtils.clamp(this.throttle + input.throttle * T.throttleRate * dt, 0, 1);
+    if (input.throttleTarget != null && !input.throttle) {
+      const step = T.leverRate * dt;
+      this.throttle += THREE.MathUtils.clamp(input.throttleTarget - this.throttle, -step, step);
+    } else {
+      this.throttle = THREE.MathUtils.clamp(this.throttle + input.throttle * T.throttleRate * dt, 0, 1);
+    }
 
     const fwd = this.forward(_fwd);
     const up = _up.set(0, 1, 0).applyQuaternion(this.quaternion);

@@ -6,6 +6,11 @@
 //   Space       – wheel brakes
 //   Drag        – look around,  scroll / pinch – zoom
 //   C camera · T jump into the sky · Enter back to the airfield · H help · M mute · P pause
+//
+// On touch screens, `touch` (see touch.js) adds a thumbstick, throttle lever and tilt
+// steering, and dragging on the sky looks around with one finger or zooms with two.
+
+const clamp1 = (v) => Math.max(-1, Math.min(1, v));
 
 export class Input {
   constructor(el) {
@@ -13,6 +18,8 @@ export class Input {
     this.invertPitch = false;
     this.handlers = {};
     this.look = { dx: 0, dy: 0, dragging: false, zoom: 0 };
+    this.touch = null; // TouchControls, set by main.js
+    this.fingers = new Map(); // touch pointers on the canvas (look / pinch)
 
     window.addEventListener('keydown', (e) => {
       if (e.metaKey) return; // leave ⌘ shortcuts to macOS
@@ -26,13 +33,21 @@ export class Input {
     el.addEventListener('pointerdown', (e) => {
       this.look.dragging = true;
       el.setPointerCapture(e.pointerId);
+      if (e.pointerType === 'touch') this.fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     });
     el.addEventListener('pointermove', (e) => {
       if (!this.look.dragging) return;
+      if (e.pointerType === 'touch') return this.moveFinger(e);
       this.look.dx += e.movementX;
       this.look.dy += e.movementY;
     });
-    const end = () => (this.look.dragging = false);
+    const end = (e) => {
+      if (e.pointerType === 'touch') {
+        this.fingers.delete(e.pointerId);
+        if (this.fingers.size) return;
+      }
+      this.look.dragging = false;
+    };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     el.addEventListener(
@@ -45,6 +60,28 @@ export class Input {
     );
   }
 
+  // one finger looks around, two fingers pinch to zoom
+  moveFinger(e) {
+    const f = this.fingers.get(e.pointerId);
+    if (!f) return;
+    if (this.fingers.size >= 2) {
+      const before = this.pinchSpread();
+      f.x = e.clientX;
+      f.y = e.clientY;
+      this.look.zoom -= (this.pinchSpread() - before) * 1.5;
+      return;
+    }
+    this.look.dx += e.clientX - f.x;
+    this.look.dy += e.clientY - f.y;
+    f.x = e.clientX;
+    f.y = e.clientY;
+  }
+
+  pinchSpread() {
+    const [a, b] = this.fingers.values();
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  }
+
   on(code, fn) {
     this.handlers[code] = fn;
   }
@@ -54,14 +91,21 @@ export class Input {
   }
 
   read() {
+    const t = this.touch?.read();
     let pitch = this.axis(['ArrowUp'], ['ArrowDown']); // stick back = nose up
+    let roll = this.axis(['ArrowLeft'], ['ArrowRight']);
+    if (t) {
+      pitch = clamp1(pitch + t.pitch);
+      roll = clamp1(roll + t.roll);
+    }
     if (this.invertPitch) pitch = -pitch;
     return {
       pitch,
-      roll: this.axis(['ArrowLeft'], ['ArrowRight']),
+      roll,
       yaw: this.axis(['KeyA'], ['KeyD']),
       throttle: this.axis(['KeyS'], ['KeyW']),
-      brake: this.keys.has('Space'),
+      throttleTarget: t?.throttleTarget ?? null, // touch lever position, eased towards
+      brake: this.keys.has('Space') || !!t?.brake,
     };
   }
 

@@ -28,8 +28,19 @@ Edits hot-reload in the browser. `window.sim` in the dev console exposes the fli
 | G | let a few hours pass (day → golden hour → sunset → night) |
 | M / N / P / H | sound / music / pause / help |
 
+### On a phone or tablet
+
+Touch controls appear on the first touch (add `?touch` to the URL to try them with a mouse). Landscape is best; portrait works too.
+
+- **left thumb**: throttle lever. Slide it up or down from anywhere on the left; it stays where you leave it. Closing it on the ground brakes.
+- **right thumb**: stick. Thumb up = nose down, down = nose up, left/right = roll (also steers on the ground).
+- **drag the sky** to look around, **pinch** to zoom.
+- **tilt**: steer by tilting the device. However you're holding it when you turn it on counts as level; ⟲ re-centres. It needs https (fine on GitHub Pages). For local testing on a phone, serve the dev server over https.
+- **☰**: everything else (camera, into the sky, airfield, pass time, sound, music, pause, invert pitch, fullscreen).
+
 ## Where things live
 
+- `src/touch.js`: phone/tablet controls: thumbstick, throttle lever, tilt steering, the ☰ menu. Dormant on desktop.
 - `src/plane/flight.js`: flight model. All the feel is in `TUNING` at the top.
 - `src/plane/model.js`: the biplane, built from primitives. Colours in `PALETTE`.
 - `src/world/terrain.js`: island height function (`heightFn`), the painted per-pixel ground shader (including the wind waves rolling through grass and crops), airfield/lake/village placement (`WORLD`), and the river's waypoints (`RIVER`).
