@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { toon, celRamp, addOutlines } from '../materials.js';
 import { groundHeight, WORLD } from './terrain.js';
 import { LAYOUT } from './layout.js';
+import { withFarLod } from './lod.js';
 import { mulberry32, createNoise2D } from '../noise.js';
 
 const rand = mulberry32(1234);
@@ -73,6 +74,27 @@ function instanced(geo, mat, list, { colours, shadow = true } = {}) {
   return mesh;
 }
 
+/**
+ * Like instanced(), but split into map tiles so the renderer can skip the ones that are off
+ * screen or outside the sun's shadow area. One mesh spanning the island would be drawn in full,
+ * twice a frame (once for the view, once for shadows). For static things only.
+ */
+function instancedTiles(geo, mat, list, opts, farGeo = null, tile = 500) {
+  const tiles = new Map();
+  for (const it of list) {
+    const key = `${Math.floor(it.x / tile)},${Math.floor(it.z / tile)}`;
+    if (!tiles.has(key)) tiles.set(key, []);
+    tiles.get(key).push(it);
+  }
+  const group = new THREE.Group();
+  for (const items of tiles.values()) {
+    const mesh = instanced(geo, mat, items, opts);
+    group.add(mesh);
+    if (farGeo) group.add(...withFarLod(mesh, farGeo));
+  }
+  return group;
+}
+
 // ---- Countryside (static) ------------------------------------------------------
 export function createCountryside() {
   const group = new THREE.Group();
@@ -96,7 +118,7 @@ export function createCountryside() {
     });
   }
   const bushMat = toon({ color: '#ffffff', ramp: celRamp, rim: 0.4, rimColor: '#fff6c8' });
-  group.add(instanced(lumpyBall(1, 0.2), bushMat, bushes, { colours: true }));
+  group.add(instancedTiles(lumpyBall(1, 0.2), bushMat, bushes, { colours: true }, lumpyBall(0, 0.2)));
 
   // orchards: neat rows of little fruit trees
   const orchardTrees = [];
@@ -116,8 +138,9 @@ export function createCountryside() {
   const allTrees = [...orchardTrees, ...hedgeTrees.map((t) => ({ ...t, sx: t.sx * 1.6 }))];
   const trunkMat = toon({ color: '#8b5e3c', ramp: celRamp, rim: 0.1 });
   const canopyMat = toon({ color: '#ffffff', ramp: celRamp, rim: 0.45, rimColor: '#fff6c8', wind: 0.02 });
-  group.add(instanced(smallTrunk, trunkMat, allTrees));
-  group.add(instanced(smallCanopy, canopyMat, allTrees, { colours: true }));
+  group.add(instancedTiles(smallTrunk, trunkMat, allTrees));
+  const smallCanopyFar = lumpyBall(0, 0.18, 4).scale(2.0, 1.7, 2.0).translate(0, 3.2, 0);
+  group.add(instancedTiles(smallCanopy, canopyMat, allTrees, { colours: true }, smallCanopyFar));
 
   // hay bales in some wheat fields
   const bales = [];
@@ -128,7 +151,7 @@ export function createCountryside() {
     });
   }
   const baleGeo = new THREE.CylinderGeometry(1, 1, 1, 14);
-  group.add(instanced(baleGeo, toon({ color: '#e6c467', ramp: celRamp, rim: 0.3 }), bales));
+  group.add(instancedTiles(baleGeo, toon({ color: '#e6c467', ramp: celRamp, rim: 0.3 }), bales));
 
   // sheep!
   const sheep = [];

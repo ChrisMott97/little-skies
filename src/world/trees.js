@@ -4,6 +4,7 @@ import { mulberry32, createNoise2D } from '../noise.js';
 import { toon, celRamp } from '../materials.js';
 import { WORLD, RIVER, groundHeight, forestAt, flatness } from './terrain.js';
 import { isReserved } from './layout.js';
+import { withFarLod } from './lod.js';
 
 const noise = createNoise2D(5);
 
@@ -27,6 +28,14 @@ function roundCanopyGeo() {
   g.computeVertexNormals();
   return g;
 }
+
+// far-away stand-ins: one lump instead of three, one cone instead of three
+function farCanopyGeo() {
+  const g = lumpy(new THREE.IcosahedronGeometry(2.9, 1), 0.3, 0.9).translate(0, 4.5, 0);
+  g.computeVertexNormals();
+  return g;
+}
+const farPineGeo = () => new THREE.ConeGeometry(2.3, 7.0, 6).translate(0, 5.0, 0);
 
 function pineGeo() {
   const a = new THREE.ConeGeometry(2.3, 4.2, 8).translate(0, 3.6, 0);
@@ -119,6 +128,8 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
   const roundGeo = roundCanopyGeo();
   const pineG = pineGeo();
   const pineTrunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 2.2, 6).translate(0, 1.1, 0);
+  const roundFar = farCanopyGeo();
+  const pineFar = farPineGeo();
 
   const trunkMat = toon({ color: '#8b5e3c', ramp: celRamp, rim: 0.1 });
   const canopyMat = toon({ color: '#ffffff', ramp: celRamp, rim: 0.45, rimColor: '#fff6c8', wind: 0.02 });
@@ -134,7 +145,7 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
   const col = new THREE.Color();
   let total = 0;
 
-  const build = (list, geo, mat, withColour) => {
+  const build = (list, geo, mat, withColour, farGeo) => {
     if (!list.length) return;
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
     list.forEach((t, i) => {
@@ -154,13 +165,14 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
     mesh.receiveShadow = true;
     mesh.computeBoundingSphere();
     group.add(mesh);
+    if (farGeo) group.add(...withFarLod(mesh, farGeo));
   };
 
   for (const c of chunks.values()) {
     build(c.round, trunkGeo, trunkMat, false);
-    build(c.round, roundGeo, canopyMat, true);
+    build(c.round, roundGeo, canopyMat, true, roundFar);
     build(c.pine, pineTrunkGeo, trunkMat, false);
-    build(c.pine, pineG, pineMat, true);
+    build(c.pine, pineG, pineMat, true, pineFar);
     total += c.round.length + c.pine.length;
   }
   group.userData.count = total;

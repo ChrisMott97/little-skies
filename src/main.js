@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import './shadows.js';
 import { shared } from './materials.js';
 import { createTerrain, groundHeight } from './world/terrain.js';
 import { createWater } from './world/water.js';
@@ -20,6 +21,7 @@ import { TouchControls } from './touch.js';
 import { Sound } from './audio.js';
 import { createFx } from './fx.js';
 import { createInteractions } from './world/interactions.js';
+import { LOD, updateLod, SHADOW_ONLY_LAYER } from './world/lod.js';
 
 // ---- Loading card ---------------------------------------------------------------
 // Building the world is one long synchronous job, so we pause between the big pieces to let
@@ -44,10 +46,15 @@ window.addEventListener('keydown', swallowKeys, true);
 // phones and tablets get a lighter render (post-processing at full Retina res is the main cost)
 const touchFirst = matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch');
 const SHADOW_RES = touchFirst ? 1024 : 2048;
+LOD.distance = touchFirst ? 800 : 1400; // where trees and bushes swap to simpler shapes
+LOD.simpleShadows = touchFirst; // …and on phones, cast their shadows from those shapes too
 
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, touchFirst ? 1.5 : 2));
+// no canvas antialiasing: the scene is drawn into the post-processing target (which has its own
+// MSAA), so the canvas only ever gets a full-screen quad
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+let pixelRatio = Math.min(window.devicePixelRatio, touchFirst ? 1.5 : 2);
+renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
@@ -77,10 +84,18 @@ scene.add(hemi);
 const sun = new THREE.DirectionalLight('#fff0d6', 2.55);
 sun.castShadow = true;
 sun.shadow.mapSize.set(SHADOW_RES, SHADOW_RES);
-const S = 150;
-Object.assign(sun.shadow.camera, { left: -S, right: S, top: S, bottom: -S, near: 1, far: 1200 });
+// The shadow map covers a square around the plane that grows as you climb (shadows.js fades
+// them out softly towards its edge, so there's no hard line sweeping over the ground).
+let S = 150;
+const setShadowExtent = (s) => {
+  S = s;
+  Object.assign(sun.shadow.camera, { left: -S, right: S, top: S, bottom: -S, near: 1, far: 1200 });
+  sun.shadow.camera.updateProjectionMatrix();
+};
+setShadowExtent(S);
 sun.shadow.bias = -0.0005;
 sun.shadow.normalBias = 0.6;
+sun.shadow.camera.layers.enable(SHADOW_ONLY_LAYER);
 scene.add(sun, sun.target);
 
 // ---- World ------------------------------------------------------------------
@@ -91,7 +106,7 @@ const terrain = createTerrain(paintFeatures(), REGION, sunDir);
 scene.add(terrain);
 const water = createWater(sunDir);
 scene.add(water);
-const clouds = createClouds(sunDir);
+const clouds = createClouds(sunDir, { detail: touchFirst ? 3 : 5 });
 scene.add(clouds);
 await step('planting trees…');
 const trees = createTrees();
@@ -117,7 +132,7 @@ const boats = createBoats();
 scene.add(boats);
 const fx = createFx();
 scene.add(fx.group);
-const post = createPost(renderer, scene, camera);
+const post = createPost(renderer, scene, camera, { light: touchFirst });
 const day = createDayCycle({ scene, sun, hemi, sky, clouds, water, terrain, post, lamps: buildings.userData.lamps });
 
 // ---- Plane ------------------------------------------------------------------
@@ -297,10 +312,32 @@ window.addEventListener('resize', () => {
 let last = performance.now();
 let lastPeriod = '';
 let t = 0;
-const shadowSnap = (2 * S) / SHADOW_RES;
+const _ahead = new THREE.Vector3();
+
+// Phones: no more than 60 fps (120 Hz screens would otherwise draw twice as many frames and get
+// warm), and if frames stay slow, step the resolution down a little at a time.
+const FRAME_CAP = touchFirst ? 1000 / 60 : 0;
+const perf = { avg: 1000 / 60, slow: 0 };
+function adaptResolution(ms) {
+  if (ms > 250) return; // a hitch or a trip to another tab, not a slow phone
+  perf.avg += (ms - perf.avg) * 0.05;
+  perf.slow = perf.avg > 24 ? perf.slow + ms : 0; // under ~40 fps…
+  if (perf.slow > 2500 && pixelRatio > 1) {
+    // …for a couple of seconds
+    pixelRatio = Math.max(1, pixelRatio - 0.25);
+    renderer.setPixelRatio(pixelRatio);
+    post.setSize(window.innerWidth, window.innerHeight);
+    perf.slow = 0;
+    perf.avg = 1000 / 60;
+    console.log(`[sim] frames are slow, resolution ×${pixelRatio}`);
+  }
+}
 
 function frame() {
+  requestAnimationFrame(frame);
   const now = performance.now();
+  if (FRAME_CAP && now - last < FRAME_CAP * 0.75) return;
+  if (FRAME_CAP) adaptResolution(now - last);
   const dt = Math.min((now - last) / 1000, 1 / 20);
   last = now;
   if (!paused) {
@@ -339,14 +376,30 @@ function frame() {
   }
   touch.update(dt, flight);
   chase.update(dt, t, flight, input.consumeLook());
+  updateLod(camera.position);
   sky.position.copy(camera.position);
 
-  // keep the shadow frustum centred on the plane (snapped to texels to avoid shimmer)
+  // Shadows cover more ground the higher you fly (in steps, so the map doesn't swim), and sit
+  // a little ahead of the plane where the camera is looking. Snapped to texels to avoid shimmer.
   const c = flight.position;
-  const sx = Math.round(c.x / shadowSnap) * shadowSnap;
-  const sz = Math.round(c.z / shadowSnap) * shadowSnap;
-  sun.target.position.set(sx, c.y, sz);
-  sun.position.set(sx, c.y, sz).addScaledVector(day.lightDir, 500);
+  const agl = Math.max(0, c.y - groundHeight(c.x, c.z));
+  const level = Math.log2(1 + agl / 120); // 0 on the ground, 1 at ~120 m, 2 at ~360 m
+  if (Math.abs(level - Math.log2(S / 150)) > 0.65) setShadowExtent(150 * 2 ** THREE.MathUtils.clamp(Math.round(level), 0, 2));
+  camera.getWorldDirection(_ahead).setY(0);
+  if (_ahead.lengthSq() > 1e-6) _ahead.normalize().multiplyScalar(S * 0.45);
+  const shadowSnap = (2 * S) / SHADOW_RES;
+  const sx = Math.round((c.x + _ahead.x) / shadowSnap) * shadowSnap;
+  const sz = Math.round((c.z + _ahead.z) / shadowSnap) * shadowSnap;
+  // The shadow camera is a box slanted along the sunlight. Keep it only as deep as it needs to
+  // be (from a bit above the plane down to the ground), or a low sun drags a strip of
+  // countryside kilometres long into the shadow pass.
+  const gy = groundHeight(sx, sz);
+  const ly = Math.max(0.15, day.lightDir.y);
+  const reach = (Math.max(c.y - gy, 0) + 150) / ly;
+  sun.target.position.set(sx, gy, sz);
+  sun.position.set(sx, gy, sz).addScaledVector(day.lightDir, reach);
+  sun.shadow.camera.far = reach + 220 / ly;
+  sun.shadow.camera.updateProjectionMatrix();
 
   // HUD
   ui.speed.textContent = Math.round(flight.speed * 1.944);
@@ -355,7 +408,6 @@ function frame() {
 
   if (window.sim?.noPost) renderer.render(scene, camera);
   else post.render();
-  requestAnimationFrame(frame);
 }
 
 // warm up every shader now (behind the card) rather than stuttering on the first frame

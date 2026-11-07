@@ -34,12 +34,17 @@ const GradeShader = {
     }`,
 };
 
-export function createPost(renderer, scene, camera) {
+/** `light`: phones/tablets run the bloom at a quarter of the usual resolution (it's soft anyway). */
+export function createPost(renderer, scene, camera, { light = false } = {}) {
   const size = renderer.getSize(new THREE.Vector2());
   const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
   const composer = new EffectComposer(renderer, target);
   composer.addPass(new RenderPass(scene, camera));
   const bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.16, 0.5, 0.97);
+  if (light) {
+    const setSize = bloom.setSize.bind(bloom);
+    bloom.setSize = (w, h) => setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
+  }
   composer.addPass(bloom);
   const grade = new ShaderPass(GradeShader);
   composer.addPass(grade);

@@ -57,8 +57,8 @@ export function createSky(sunDir) {
 
 // ---- Fluffy cumulus clouds --------------------------------------------------
 
-function lumpySphere() {
-  const geo = new THREE.IcosahedronGeometry(1, 5);
+function lumpySphere(detail) {
+  const geo = new THREE.IcosahedronGeometry(1, detail);
   const noise = createNoise2D(7);
   const p = geo.attributes.position;
   const v = new THREE.Vector3();
@@ -72,7 +72,8 @@ function lumpySphere() {
   return geo;
 }
 
-export function createClouds(sunDir, { count = 70, area = 9000 } = {}) {
+/** `detail`: puff roundness. Every puff is drawn every frame, so phones get fewer triangles. */
+export function createClouds(sunDir, { count = 70, area = 9000, detail = 5 } = {}) {
   const rand = mulberry32(99);
   const puffs = [];
   const clouds = [];
@@ -99,7 +100,7 @@ export function createClouds(sunDir, { count = 70, area = 9000 } = {}) {
     clouds.push(cloud);
   }
 
-  const geo = lumpySphere();
+  const geo = lumpySphere(detail);
   const baseAttr = new Float32Array(puffs.length);
   puffs.forEach((p, i) => (baseAttr[i] = p.base));
   geo.setAttribute('aBase', new THREE.InstancedBufferAttribute(baseAttr, 1));
