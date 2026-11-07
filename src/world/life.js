@@ -150,9 +150,82 @@ export function createCountryside() {
   const woolMat = toon({ color: '#fbf6ea', ramp: celRamp, rim: 0.5 });
   const faceMat = toon({ color: '#4a3b3f', ramp: celRamp, rim: 0.2 });
   const sheepList = sheep.map((sh) => ({ ...sh, sx: 1 }));
-  group.add(instanced(bodyGeo, woolMat, sheepList));
-  group.add(instanced(headGeo, faceMat, sheepList));
-  group.add(instanced(legGeo, faceMat, legs, { shadow: false }));
+  const bodies = instanced(bodyGeo, woolMat, sheepList);
+  const heads = instanced(headGeo, faceMat, sheepList);
+  const legMesh = instanced(legGeo, faceMat, legs, { shadow: false });
+  group.add(bodies, heads, legMesh);
+  for (const m of [bodies, heads, legMesh]) m.frustumCulled = false; // they wander off their bounds
+
+  // buzz them low and they bound away in a fluster, then settle and graze again
+  let baaTimer = 0;
+  const placeSheep = (sh, i, hop, tilt) => {
+    m4.compose(p.set(sh.x, sh.y + hop, sh.z), q.setFromEuler(e.set(tilt, sh.ry, 0)), s.set(1, 1, 1));
+    bodies.setMatrixAt(i, m4);
+    heads.setMatrixAt(i, m4);
+    const c = Math.cos(sh.ry);
+    const sn = Math.sin(sh.ry);
+    [[-0.3, -0.5], [0.3, -0.5], [-0.3, 0.5], [0.3, 0.5]].forEach(([lx, lz], k) => {
+      // legs tuck up a little mid-hop
+      m4.compose(p.set(sh.x + lx * c + lz * sn, sh.y + 0.25 + hop * 0.92, sh.z - lx * sn + lz * c), q.identity(), s.set(1, hop > 0.1 ? 0.7 : 1, 1));
+      legMesh.setMatrixAt(i * 4 + k, m4);
+    });
+  };
+  group.userData.update = (dt, t, play) => {
+    if (!play) return;
+    const P = play.flight.position;
+    baaTimer -= dt;
+    let scared = 0;
+    let moved = false;
+    sheep.forEach((sh, i) => {
+      const dx = sh.x - P.x;
+      const dz = sh.z - P.z;
+      const d2 = dx * dx + dz * dz;
+      if (!sh.run && d2 < 45 * 45 && P.y - sh.y < 28 && play.flight.speed > 8) {
+        const d = Math.sqrt(d2) || 1;
+        const spd = 4 + Math.random() * 3;
+        const a = Math.atan2(dx, dz) + (Math.random() - 0.5) * 1.2;
+        sh.run = 2.2 + Math.random() * 0.8;
+        sh.runFull = sh.run;
+        sh.vx = Math.sin(a) * spd;
+        sh.vz = Math.cos(a) * spd;
+        sh.delay = (d / 45) * 0.35 + Math.random() * 0.15;
+        sh.hopPh = Math.random() * Math.PI;
+        scared++;
+      }
+      if (!sh.run) return;
+      if (sh.delay > 0) {
+        sh.delay -= dt;
+        return;
+      }
+      sh.run = Math.max(0, sh.run - dt);
+      const k = sh.run / sh.runFull;
+      sh.x += sh.vx * k * dt;
+      sh.z += sh.vz * k * dt;
+      sh.y = groundHeight(sh.x, sh.z);
+      const target = Math.atan2(sh.vx, sh.vz);
+      let dy = target - sh.ry;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      sh.ry += dy * Math.min(1, dt * 8);
+      sh.hopPh += dt * 11;
+      const hop = Math.abs(Math.sin(sh.hopPh)) * 0.8 * Math.min(1, k * 1.5);
+      placeSheep(sh, i, hop, -Math.cos(sh.hopPh) * 0.25 * k);
+      if (sh.run === 0) {
+        placeSheep(sh, i, 0, 0);
+      }
+      moved = true;
+    });
+    if (moved) {
+      bodies.instanceMatrix.needsUpdate = true;
+      heads.instanceMatrix.needsUpdate = true;
+      legMesh.instanceMatrix.needsUpdate = true;
+    }
+    if (scared && baaTimer <= 0) {
+      baaTimer = 2.5;
+      play.sound.baa?.();
+      if (scared > 3) setTimeout(() => play.sound.baa?.(1.2), 350);
+      play.emit('sheep', { count: scared });
+    }
+  };
 
   group.userData.counts = { bushes: bushes.length, orchard: orchardTrees.length, bales: bales.length, sheep: sheep.length };
   return group;
@@ -184,22 +257,61 @@ function balloon(colours) {
   envMesh.scale.setScalar(9);
   envMesh.position.y = 10;
   g.add(envMesh);
+  // everything under the envelope hangs off one "rig", so it can drift down on its own
+  const rig = new THREE.Group();
+  g.add(rig);
   const basket = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 0.9, 1.3, 10), toon({ color: '#a8743f' }));
   basket.position.y = -2.2;
-  g.add(basket);
+  rig.add(basket);
+  // a little balloonist peeking over the rim
+  const pilot = new THREE.Group();
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.36, 12, 10), toon({ color: '#f3c9a6' }));
+  head.position.y = -0.95;
+  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.42, 0.28, 10), toon({ color: colours[0] }));
+  hat.position.y = -0.62;
+  const coat = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.7, 10), toon({ color: colours[2] ?? '#5b6f9c' }));
+  coat.position.y = -1.55;
+  pilot.add(head, hat, coat);
+  pilot.position.x = 0.35;
+  rig.add(pilot);
   const ropeMat = toon({ color: '#6a5040' });
   for (let i = 0; i < 4; i++) {
     const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
     const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 4.2, 4), ropeMat);
     rope.position.set(Math.cos(a) * 1.4, -0.1, Math.sin(a) * 1.4);
     rope.rotation.set(Math.sin(a) * 0.12, 0, -Math.cos(a) * 0.12);
-    g.add(rope);
+    rig.add(rope);
   }
   const burner = new THREE.Mesh(new THREE.SphereGeometry(0.35, 8, 6), toon({ color: '#ffd27a', emissive: '#ff9a3a' }));
   burner.position.y = 1.6;
-  g.add(burner);
+  rig.add(burner);
+  // an emergency parachute, folded away until it's needed
+  const chute = new THREE.Group();
+  const canopyGeo = new THREE.SphereGeometry(3.4, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2.4);
+  const cc = canopyGeo.attributes.position;
+  const ccol = new Float32Array(cc.count * 3);
+  for (let i = 0; i < cc.count; i++) {
+    const seg = Math.floor(((Math.atan2(cc.getZ(i), cc.getX(i)) + Math.PI) / (Math.PI * 2)) * 8 + 0.5) % 2;
+    c.set(seg ? colours[0] : '#fbf3e2').convertSRGBToLinear();
+    ccol.set([c.r, c.g, c.b], i * 3);
+  }
+  canopyGeo.setAttribute('color', new THREE.BufferAttribute(ccol, 3));
+  const canopy = new THREE.Mesh(canopyGeo, toon({ color: '#ffffff', vertexColors: true, ramp: celRamp, rim: 0.4, side: THREE.DoubleSide }));
+  canopy.position.y = 3.2;
+  chute.add(canopy);
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    const line = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 4.6, 3), ropeMat);
+    line.position.set(Math.cos(a) * 1.5, 1.4, Math.sin(a) * 1.5);
+    line.rotation.set(Math.sin(a) * -0.4, 0, Math.cos(a) * 0.4);
+    chute.add(line);
+  }
+  chute.position.y = 1.4;
+  chute.visible = false;
+  rig.add(chute);
   g.traverse((o) => o.isMesh && (o.castShadow = true));
   addOutlines(g, 0.05);
+  g.userData = { env: envMesh, rig, chute, pilot };
   return g;
 }
 
@@ -216,6 +328,8 @@ export function createBalloons() {
     group.add(b);
     return {
       b,
+      colours: sc,
+      state: 'fly',
       cx: (rand() - 0.5) * 1600,
       cz: (rand() - 0.3) * 1600,
       r: 300 + rand() * 500,
@@ -224,7 +338,105 @@ export function createBalloons() {
       alt: 150 + rand() * 170,
     };
   });
-  group.userData.update = (dt, t) => {
+  const tmp = new THREE.Vector3();
+  const tmp2 = new THREE.Vector3();
+
+  /** Pop! The envelope zips off like a let-go party balloon; the basket parachutes down. */
+  function pop(o, play) {
+    const { env, rig, chute } = o.b.userData;
+    o.state = 'popped';
+    o.timer = 0;
+    const centre = env.getWorldPosition(tmp).clone();
+    centre.y -= 1;
+    play.fx.flutter(centre, { n: 90, colours: [...o.colours, '#ffffff'], size: 0.9, speed: 16, spread: 7, life: 6, vel: tmp2.copy(play.flight.velocity).multiplyScalar(0.25) });
+    play.fx.puff(centre, { n: 14, colour: ['#ffffff', '#fff6e4'], size: 3.5, spread: 6, speed: 9, life: 1.1 });
+    group.attach(env);
+    group.attach(rig);
+    o.zip = { v: new THREE.Vector3(0, 18, 0).addScaledVector(play.flight.velocity, 0.3), turn: 0, t: 0, spin: new THREE.Vector3() };
+    rig.userData.vy = -6;
+    chute.visible = true;
+    chute.scale.setScalar(0.01);
+    play.sound.pop?.();
+    play.sound.deflate?.(2.6);
+    play.flight.speed *= 0.93;
+    play.emit('pop');
+  }
+
+  function updatePopped(o, dt, t, play) {
+    const { env, rig, chute, pilot } = o.b.userData;
+    o.timer += dt;
+    // the envelope: darting about, shrinking, spluttering
+    const z = o.zip;
+    if (env.visible) {
+      z.t += dt;
+      z.turn -= dt;
+      if (z.turn <= 0) {
+        z.turn = 0.08 + Math.random() * 0.18;
+        tmp.randomDirection();
+        tmp.y = Math.abs(tmp.y) * 0.8 + 0.25;
+        z.target = tmp.normalize().multiplyScalar(26 + Math.random() * 18).clone();
+        z.spin.set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).multiplyScalar(14);
+      }
+      z.v.lerp(z.target, 1 - Math.exp(-9 * dt));
+      env.position.addScaledVector(z.v, dt);
+      env.rotation.x += z.spin.x * dt;
+      env.rotation.y += z.spin.y * dt;
+      env.rotation.z += z.spin.z * dt;
+      const k = Math.min(z.t / 2.6, 1);
+      const size = 9 * (1 - k * 0.85);
+      const wob = Math.sin(t * 38) * 0.18 * (1 - k);
+      env.scale.set(size * (1 + wob), size * (1 - wob), size * (1 + wob));
+      if (Math.random() < dt * 14) play.fx.puff(env.position, { n: 1, colour: '#ffffff', size: 1.2, speed: 1, life: 0.6 });
+      if (k >= 1) {
+        env.visible = false;
+        play.fx.puff(env.position, { n: 8, colour: ['#ffffff', o.colours[0]], size: 2, speed: 6, life: 0.9 });
+      }
+    }
+    // the basket: a little drop, then the chute pops open and it sways down
+    const open = Math.min(Math.max((o.timer - 0.35) / 0.5, 0), 1);
+    const boing = open < 1 ? open * (1 + Math.sin(open * Math.PI) * 0.4) : 1;
+    chute.scale.set(Math.max(boing, 0.01), Math.max(boing * (0.8 + Math.sin(t * 2.2) * 0.04), 0.01), Math.max(boing, 0.01));
+    const gh = Math.max(groundHeight(rig.position.x, rig.position.z), 0);
+    const floor = gh + 2.85;
+    if (rig.position.y > floor) {
+      const terminal = open > 0.5 ? -4.2 : -14;
+      rig.userData.vy += (terminal - rig.userData.vy) * Math.min(1, dt * (open > 0.5 ? 3 : 1));
+      rig.position.y = Math.max(floor, rig.position.y + rig.userData.vy * dt);
+      rig.rotation.z = Math.sin(t * 1.3 + o.phase) * 0.12 * open;
+      rig.rotation.x = Math.sin(t * 0.9 + o.phase) * 0.08 * open;
+      rig.position.x += Math.sin(t * 0.4 + o.phase) * dt * 1.2;
+      pilot.rotation.z = Math.sin(t * 6) * 0.15; // a nervous wobble
+    } else {
+      // landed: the chute sighs down over the basket
+      o.landed = (o.landed ?? 0) + dt;
+      const f = Math.min(o.landed / 1.6, 1);
+      chute.scale.y = Math.max(0.01, 1 - f * 0.8);
+      chute.rotation.z = f * 0.9;
+      rig.rotation.z *= 1 - f;
+      rig.rotation.x *= 1 - f;
+      pilot.rotation.z = 0;
+      if (gh <= 0) rig.position.y = floor + Math.sin(t * 1.1) * 0.15; // bobbing on the sea
+    }
+  }
+
+  function reinflate(o) {
+    const { env, rig, chute, pilot } = o.b.userData;
+    o.b.add(env);
+    o.b.add(rig);
+    env.position.set(0, 10, 0);
+    env.rotation.set(0, 0, 0);
+    env.visible = true;
+    rig.position.set(0, 0, 0);
+    rig.rotation.set(0, 0, 0);
+    chute.visible = false;
+    chute.rotation.set(0, 0, 0);
+    pilot.rotation.set(0, 0, 0);
+    o.landed = 0;
+    o.state = 'inflate';
+    o.timer = 0;
+  }
+
+  group.userData.update = (dt, t, play) => {
     for (const o of balloons) {
       const a = o.phase + t * o.speed;
       const x = o.cx + Math.cos(a) * o.r;
@@ -232,8 +444,27 @@ export function createBalloons() {
       const floor = Math.max(groundHeight(x, z), 0) + 60;
       o.b.position.set(x, Math.max(o.alt + Math.sin(t * 0.15 + o.phase) * 12, floor), z);
       o.b.rotation.y = t * 0.03 + o.phase;
+      if (!play) continue;
+      const P = play.flight.position;
+      if (o.state === 'fly') {
+        // envelope ≈ a 9.5 m ball centred 9 m above the basket ring; the basket hangs below
+        const env = tmp.set(x, o.b.position.y + 9, z);
+        const bask = tmp2.set(x, o.b.position.y - 2.2, z);
+        if (P.distanceTo(env) < 11.5 || P.distanceTo(bask) < 3.2) pop(o, play);
+      } else if (o.state === 'popped') {
+        updatePopped(o, dt, t, play);
+        // a fresh balloon floats back once you're well away
+        if (o.timer > 40 && P.distanceTo(o.b.position) > 400) reinflate(o);
+      } else if (o.state === 'inflate') {
+        o.timer += dt;
+        const k = Math.min(o.timer / 2.5, 1);
+        const sz = 9 * (1 - Math.pow(1 - k, 3)) * (1 + Math.sin(k * Math.PI * 2.5) * 0.12 * (1 - k));
+        o.b.userData.env.scale.setScalar(Math.max(sz, 0.01));
+        if (k >= 1) o.state = 'fly';
+      }
     }
   };
+  group.userData.balloons = balloons;
   return group;
 }
 
@@ -248,7 +479,7 @@ export function createBirds() {
   const birds = [];
   for (const f of flocks) {
     for (let i = 0; i < f.n; i++) {
-      birds.push({ f, off: rand() * Math.PI * 2, dr: (rand() - 0.5) * 30, dy: (rand() - 0.5) * 10, flap: rand() * 10, fs: 7 + rand() * 4 });
+      birds.push({ f, off: rand() * Math.PI * 2, dr: (rand() - 0.5) * 30, dy: (rand() - 0.5) * 10, flap: rand() * 10, fs: 7 + rand() * 4, o: new THREE.Vector3(), ov: new THREE.Vector3() });
     }
   }
   const wing = new THREE.BufferGeometry();
@@ -263,7 +494,12 @@ export function createBirds() {
   group.add(left, right);
   const body = new THREE.Matrix4();
   const w = new THREE.Matrix4();
-  group.userData.update = (dt, t) => {
+  const away = new THREE.Vector3();
+  let flurryTimer = 0;
+  group.userData.update = (dt, t, play) => {
+    const P = play?.flight.position;
+    flurryTimer -= dt;
+    let startled = 0;
     birds.forEach((b, i) => {
       const a = b.off + t * b.f.speed;
       const r = b.f.r + b.dr;
@@ -271,10 +507,25 @@ export function createBirds() {
       const z = b.f.cz + Math.sin(a) * r;
       const ground = Math.max(groundHeight(x, z), 0);
       const y = ground + b.f.alt + b.dy + Math.sin(t * 0.7 + b.off) * 3;
-      const heading = Math.atan2(-Math.sin(a) * Math.sign(b.f.speed), Math.cos(a) * Math.sign(b.f.speed));
-      const glide = Math.sin(t * 0.5 + b.off) > 0.3;
-      const flap = glide ? 0.15 : Math.sin(t * b.fs + b.flap) * 0.6;
-      body.compose(p.set(x, y, z), q.setFromEuler(e.set(0, heading, 0)), s.set(1.4, 1.4, 1.4));
+      // scatter from the plane, then drift back into the flock on a soft spring
+      if (P) {
+        away.set(x, y, z).add(b.o).sub(P);
+        const d = away.length();
+        if (d < 32) {
+          if (b.ov.lengthSq() < 25) startled++;
+          away.normalize();
+          away.y += 0.5;
+          b.ov.addScaledVector(away, (1 - d / 32) * 90 * dt);
+        }
+      }
+      b.ov.addScaledVector(b.o, -0.35 * dt).multiplyScalar(Math.exp(-0.7 * dt));
+      b.o.addScaledVector(b.ov, dt);
+      const fluster = Math.min(b.ov.length() / 8, 1);
+      let heading = Math.atan2(-Math.sin(a) * Math.sign(b.f.speed), Math.cos(a) * Math.sign(b.f.speed));
+      if (fluster > 0.3) heading = Math.atan2(b.ov.x, b.ov.z);
+      const glide = Math.sin(t * 0.5 + b.off) > 0.3 && fluster < 0.2;
+      const flap = glide ? 0.15 : Math.sin(t * b.fs * (1 + fluster * 1.5) + b.flap) * (0.6 + fluster * 0.3);
+      body.compose(p.set(x + b.o.x, y + b.o.y, z + b.o.z), q.setFromEuler(e.set(0, heading, 0)), s.set(1.4, 1.4, 1.4));
       w.makeRotationZ(flap);
       left.setMatrixAt(i, m4.multiplyMatrices(body, w));
       w.makeRotationZ(Math.PI - flap);
@@ -282,6 +533,11 @@ export function createBirds() {
     });
     left.instanceMatrix.needsUpdate = true;
     right.instanceMatrix.needsUpdate = true;
+    if (startled > 1 && flurryTimer <= 0) {
+      flurryTimer = 4;
+      play.sound.flurry?.(Math.min(startled / 6, 1));
+      play.emit('birds', { count: startled });
+    }
   };
   return group;
 }

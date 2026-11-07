@@ -26,3 +26,26 @@ float snoise(vec2 v) {
   return 130.0 * dot(m, g);
 }
 `;
+
+// The plane's prop wash on the ground and water. Needs uTime declared first.
+// Returns x: rings spreading out behind the plane, y: a swirl right underneath it.
+export const GLSL_WASH = /* glsl */ `
+  uniform vec4 uWash[6];   // footprints: x, z, age, strength
+  uniform vec4 uPlaneWash; // plane xyz, strength
+  vec2 propWash(vec2 p) {
+    float rings = 0.0;
+    for (int i = 0; i < 6; i++) {
+      vec4 w = uWash[i];
+      if (w.z > 1.6 || w.w <= 0.0) continue;
+      float d = length(p - w.xy);
+      float r = 2.0 + w.z * 15.0;
+      float width = 1.6 + w.z * 3.0;
+      rings += (1.0 - smoothstep(0.0, width, abs(d - r))) * w.w * (1.0 - smoothstep(0.5, 1.6, w.z));
+    }
+    vec2 dp = p - uPlaneWash.xz;
+    float dist = length(dp);
+    float swirl = (1.0 - smoothstep(1.0, 11.0, dist)) * uPlaneWash.w;
+    swirl *= 0.55 + 0.45 * sin(atan(dp.y, dp.x) * 5.0 - uTime * 14.0 + dist * 0.9);
+    return vec2(clamp(rings, 0.0, 1.2), swirl);
+  }
+`;

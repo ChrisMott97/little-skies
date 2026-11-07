@@ -58,7 +58,7 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
 
   const place = (x, z, kind, scale, colour) => {
     const y = groundHeight(x, z);
-    getChunk(x, z)[kind].push({ x, y, z, scale, colour, rot: rand() * Math.PI * 2 });
+    getChunk(x, z)[kind].push({ x, y, z, scale, colour, kind, rot: rand() * Math.PI * 2, refs: [] });
   };
 
   for (let i = 0; i < attempts; i++) {
@@ -143,6 +143,7 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
       s.setScalar(t.scale);
       m4.compose(p, q, s);
       mesh.setMatrixAt(i, m4);
+      t.refs.push({ mesh, i }); // so a tree can be shaken later
       if (withColour) {
         col.set(t.colour);
         col.offsetHSL(0, 0, (rand() - 0.5) * 0.05);
@@ -163,6 +164,7 @@ export function createTrees({ attempts = 150000, chunkSize = 750 } = {}) {
     total += c.round.length + c.pine.length;
   }
   group.userData.count = total;
+  group.userData.list = [...chunks.values()].flatMap((c) => [...c.round, ...c.pine]);
   return group;
 }
 

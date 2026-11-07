@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { shared } from '../materials.js';
+import { GLSL_WASH } from '../glsl.js';
 import { WORLD, createDepthTexture } from './terrain.js';
 
 export function createWater(sunDir) {
@@ -18,6 +19,8 @@ export function createWater(sunDir) {
     },
   ]);
   uniforms.uTime = shared.uTime;
+  uniforms.uWash = shared.uWash;
+  uniforms.uPlaneWash = shared.uPlaneWash;
   uniforms.uDepth.value = createDepthTexture(1024);
 
   const mat = new THREE.ShaderMaterial({
@@ -45,6 +48,7 @@ export function createWater(sunDir) {
       varying vec3 vWorld;
       #include <common>
       #include <fog_pars_fragment>
+      ${GLSL_WASH}
 
       float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float vnoise(vec2 p) {
@@ -70,6 +74,9 @@ export function createWater(sunDir) {
         n /= 1.5;
         float band = smoothstep(0.60, 0.63, n) * (1.0 - smoothstep(0.66, 0.70, n));
         col = mix(col, uSky, band * 0.3 * (1.0 - smoothstep(300.0, 1500.0, length(cameraPosition - vWorld))));
+        // ripples fanning out where the prop wash hits the water
+        vec2 pw = propWash(vWorld.xz);
+        col = mix(col, uSky, clamp(pw.x * 0.7 + pw.y * 0.6, 0.0, 1.0) * 0.6);
 
         // view-dependent sky reflection (fresnel)
         vec3 V = normalize(cameraPosition - vWorld);

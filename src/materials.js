@@ -4,6 +4,10 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 // Shared uniforms (time drives wind sway, water, clouds...)
 export const shared = {
   uTime: { value: 0 },
+  // the plane's prop wash: xyz = position, w = strength (0 when high up)
+  uPlaneWash: { value: new THREE.Vector4(0, -1e4, 0, 0) },
+  // recent prop-wash "footprints" on the ground: x, z, age (s), strength
+  uWash: { value: Array.from({ length: 6 }, () => new THREE.Vector4(0, 0, 99, 0)) },
 };
 
 // Toon ramps: each value is the light level of one band.
@@ -49,13 +53,15 @@ export function toon(opts = {}) {
     shader.uniforms.uRim = { value: rim };
     shader.uniforms.uRimColor = { value: rimColor };
     shader.uniforms.uWind = { value: wind };
+    shader.uniforms.uPlaneWash = shared.uPlaneWash;
 
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
         `#include <common>
          uniform float uTime;
-         uniform float uWind;`
+         uniform float uWind;
+         uniform vec4 uPlaneWash;`
       )
       .replace(
         '#include <begin_vertex>',
@@ -71,6 +77,17 @@ export function toon(opts = {}) {
                    + sin(uTime * 2.7 + ip.z * 0.11) * 0.25;
            transformed.x += s * uWind * h;
            transformed.z += s * 0.5 * uWind * h;
+           #ifdef USE_INSTANCING
+             // the prop wash shoves treetops away from the plane as it passes
+             vec3 away = ip - uPlaneWash.xyz;
+             float near = uPlaneWash.w * (1.0 - smoothstep(6.0, 34.0, length(away)));
+             if (near > 0.001) {
+               vec3 dir = normalize(vec3(away.x, 0.0, away.z) + vec3(0.001, 0.0, 0.0));
+               vec3 ldir = transpose(mat3(instanceMatrix)) * dir; // world push → this tree's own frame
+               float flutter = 0.75 + 0.25 * sin(uTime * 23.0 + ip.x);
+               transformed += normalize(ldir) * near * flutter * h * 0.09;
+             }
+           #endif
          }`
       );
 
@@ -141,8 +158,14 @@ export function outlineMaterial(thickness = 0.04, color = 0x4a3438) {
       uniform float uThickness;
       #include <fog_pars_vertex>
       void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        vec3 n = normalize(normalMatrix * smoothNormal);
+        vec4 lp = vec4(position, 1.0);
+        vec3 ln = smoothNormal;
+        #ifdef USE_INSTANCING
+          lp = instanceMatrix * lp;
+          ln = mat3(instanceMatrix) * ln;
+        #endif
+        vec4 mvPosition = modelViewMatrix * lp;
+        vec3 n = normalize(normalMatrix * ln);
         mvPosition.xyz += n * uThickness;
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
@@ -182,6 +205,19 @@ export function addOutlines(root, thickness = 0.04, color) {
 export class MergeBuilder {
   constructor() {
     this.buckets = new Map(); // material -> geometries
+    this.counts = new Map(); // material -> vertices so far
+    this.tags = new Map(); // tag -> [{ material, start, count }]
+    this.tag = null;
+  }
+
+  /** Everything added until untag() belongs to `tag`, so it can be found (and hidden) after merging. */
+  setTag(tag) {
+    this.tag = tag;
+    if (tag != null && !this.tags.has(tag)) this.tags.set(tag, []);
+  }
+
+  untag() {
+    this.tag = null;
   }
 
   add(geometry, material, matrix) {
@@ -193,14 +229,30 @@ export class MergeBuilder {
     if (matrix) g.applyMatrix4(matrix);
     if (!this.buckets.has(material)) this.buckets.set(material, []);
     this.buckets.get(material).push(g);
+    const start = this.counts.get(material) ?? 0;
+    const count = g.attributes.position.count;
+    this.counts.set(material, start + count);
+    if (this.tag != null) {
+      const list = this.tags.get(this.tag);
+      const prev = list[list.length - 1];
+      if (prev && prev.material === material && prev.start + prev.count === start) prev.count += count;
+      else list.push({ material, start, count });
+    }
+  }
+
+  /** After build(): the merged-mesh vertex ranges that hold a tagged part. */
+  ranges(tag) {
+    return (this.tags.get(tag) ?? []).map((r) => ({ mesh: this.meshes.get(r.material), start: r.start, count: r.count }));
   }
 
   /** Returns a Group of merged meshes (with outlines unless outline === false). */
   build({ outline = 0.05, shadows = true } = {}) {
     const group = new THREE.Group();
+    this.meshes = new Map();
     for (const [mat, geos] of this.buckets) {
       const merged = mergeGeometries(geos);
       const mesh = new THREE.Mesh(merged, mat);
+      this.meshes.set(mat, mesh);
       mesh.castShadow = shadows;
       mesh.receiveShadow = true;
       if (mat.userData.noOutline) mesh.userData.outline = false;

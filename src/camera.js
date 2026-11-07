@@ -19,6 +19,21 @@ export class ChaseCamera {
     this._o = new THREE.Vector3();
     this._t = new THREE.Vector3();
     this.first = true;
+    this.shake = 0; // a bump: decays by itself
+  }
+
+  /** Give the camera a jolt (0..1). */
+  bump(amount) {
+    this.shake = Math.min(1.2, Math.max(this.shake, amount));
+  }
+
+  _applyShake(dt, t) {
+    if (this.shake < 0.001) return;
+    const k = this.shake * this.shake;
+    this.camera.position.x += Math.sin(t * 61) * 0.45 * k;
+    this.camera.position.y += Math.sin(t * 53 + 1) * 0.35 * k;
+    this.camera.rotateZ(Math.sin(t * 37) * 0.025 * k);
+    this.shake *= Math.exp(-4 * dt);
   }
 
   toggle() {
@@ -48,6 +63,7 @@ export class ChaseCamera {
       const lookQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-this.orbitPitch * 0.6 + 0.07, this.orbitYaw, 0, 'YXZ'));
       cam.quaternion.copy(q).multiply(lookQ);
       this.first = true;
+      this._applyShake(dt, t);
       return;
     }
 
@@ -80,5 +96,6 @@ export class ChaseCamera {
     this.lookAt.lerp(lookTarget, 1 - Math.exp(-12 * dt));
     cam.up.set(0, 1, 0);
     cam.lookAt(this.lookAt);
+    this._applyShake(dt, t);
   }
 }

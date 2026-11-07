@@ -92,6 +92,8 @@ export class Sound {
     this._engine();
     this._wind();
     this._sea();
+    this.sfxPink = noiseBuffer(ctx, 1.5, 'pink');
+    this.sfxBrown = noiseBuffer(ctx, 2, 'brown');
     this.music = new Music(ctx, this.master, this.reverb);
     if (this.musicOn) this.music.start();
   }
@@ -294,6 +296,191 @@ export class Sound {
     const t0 = this.ctx.currentTime + 0.1;
     const n = 4 + Math.floor(Math.random() * 5);
     for (let i = 0; i < n; i++) this._bell(t0 + i * 1.1, notes[i % notes.length], vol);
+  }
+
+  // ---- Bumps and pops: one-shots for the plane meeting the world ----------------
+  // A short burst of filtered noise. env: [[time, gain], ...] relative to t.
+  _noise(t, { buf = this.sfxPink, type = 'bandpass', freq = 1000, Q = 1, env, vol = 1, rate = 1, reverb = 0.3, pan = 0, sweep }) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.value = rate;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.setValueAtTime(freq, t);
+    if (sweep) f.frequency.exponentialRampToValueAtTime(sweep, t + env[env.length - 1][0]);
+    f.Q.value = Q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    for (const [dt, v] of env) g.gain.linearRampToValueAtTime(v * vol, t + dt);
+    const p = ctx.createStereoPanner();
+    p.pan.value = pan;
+    src.connect(f).connect(g).connect(p).connect(this.master);
+    if (reverb) {
+      const send = ctx.createGain();
+      send.gain.value = reverb;
+      g.connect(send).connect(this.reverb);
+    }
+    const end = env[env.length - 1][0];
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + end + 0.05);
+  }
+
+  _tone(t, { type = 'sine', f0, f1, dur, vol, attack = 0.005, reverb = 0.4 }) {
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t);
+    if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(vol, t + attack);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+    o.connect(g).connect(this.master);
+    if (reverb) {
+      const send = ctx.createGain();
+      send.gain.value = reverb;
+      g.connect(send).connect(this.reverb);
+    }
+    o.start(t);
+    o.stop(t + dur + 0.05);
+  }
+
+  /** A balloon going pop: a bright snap and a hollow "plock". */
+  pop(vol = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + 0.01;
+    this._noise(t, { type: 'highpass', freq: 1800, Q: 0.7, env: [[0.003, 0.5], [0.07, 0]], vol, reverb: 0.6 });
+    this._tone(t, { f0: 620, f1: 180, dur: 0.16, vol: 0.22 * vol });
+  }
+
+  /** ...then the "pfrrrrt" of the envelope whizzing away. */
+  deflate(dur = 2.5, vol = 1) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + 0.12;
+    const o = ctx.createOscillator();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(320, t);
+    o.frequency.linearRampToValueAtTime(520, t + dur * 0.6);
+    o.frequency.linearRampToValueAtTime(260, t + dur);
+    const flutter = ctx.createOscillator();
+    flutter.frequency.value = 23;
+    const depth = ctx.createGain();
+    depth.gain.value = 70;
+    flutter.connect(depth).connect(o.frequency);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 1400;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.07 * vol, t + 0.05);
+    g.gain.setValueAtTime(0.07 * vol, t + dur * 0.7);
+    g.gain.linearRampToValueAtTime(0, t + dur);
+    const pan = ctx.createStereoPanner();
+    pan.pan.setValueAtTime(0, t);
+    pan.pan.linearRampToValueAtTime(Math.random() < 0.5 ? -0.7 : 0.7, t + dur);
+    o.connect(lp).connect(g).connect(pan).connect(this.master);
+    o.start(t);
+    flutter.start(t);
+    o.stop(t + dur + 0.05);
+    flutter.stop(t + dur + 0.05);
+  }
+
+  /** A house tumbling into toy blocks: a soft whump, then wooden clacks and thuds. */
+  crumble(vol = 1) {
+    if (!this.ctx || vol <= 0) return;
+    const t = this.ctx.currentTime + 0.01;
+    this._noise(t, { buf: this.sfxBrown, type: 'lowpass', freq: 900, sweep: 200, Q: 0.5, env: [[0.02, 0.9], [1.4, 0]], vol, reverb: 0.5 });
+    this._tone(t, { f0: 110, f1: 45, dur: 0.5, vol: 0.3 * vol });
+    for (let i = 0; i < 9; i++) {
+      const at = t + 0.08 + Math.random() * 1.1;
+      if (Math.random() < 0.55) {
+        // wooden block knock
+        this._noise(at, { type: 'bandpass', freq: 900 + Math.random() * 1400, Q: 6, env: [[0.002, 0.7], [0.06, 0]], vol: vol * 0.8, pan: Math.random() * 1.2 - 0.6 });
+        this._tone(at, { f0: 500 + Math.random() * 500, dur: 0.07, vol: 0.05 * vol, reverb: 0.2 });
+      } else {
+        this._tone(at, { f0: 140 + Math.random() * 60, f1: 60, dur: 0.18, vol: 0.14 * vol, reverb: 0.2 });
+      }
+    }
+  }
+
+  /** The blocks flying home: a little music-box run up a pentatonic scale. */
+  rebuild(vol = 1) {
+    if (!this.ctx || vol <= 0) return;
+    const t = this.ctx.currentTime + 0.05;
+    const scale = [0, 2, 4, 7, 9, 12, 14, 16, 19];
+    const root = 523.25 * (Math.random() < 0.5 ? 1 : 0.89);
+    for (let i = 0; i < 8; i++) {
+      const f = root * Math.pow(2, scale[i] / 12);
+      const at = t + i * 0.13 + (i === 7 ? 0.12 : 0);
+      this._tone(at, { f0: f, dur: 1.4, vol: 0.05 * vol, reverb: 1 });
+      this._tone(at, { f0: f * 3, dur: 0.4, vol: 0.012 * vol, reverb: 1 });
+    }
+  }
+
+  /** A startled sheep. */
+  baa(pitch = 1) {
+    if (!this.ctx) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime + 0.02;
+    const dur = 0.75;
+    const f = (290 + Math.random() * 70) * pitch;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(f * 1.06, t);
+    o.frequency.linearRampToValueAtTime(f, t + 0.12);
+    o.frequency.linearRampToValueAtTime(f * 0.9, t + dur);
+    const vib = ctx.createOscillator();
+    vib.frequency.value = 7.5;
+    const vd = ctx.createGain();
+    vd.gain.value = f * 0.045;
+    vib.connect(vd).connect(o.frequency);
+    // two soft formants make it an "ehh" rather than a buzz
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0, t);
+    out.gain.linearRampToValueAtTime(0.06, t + 0.06);
+    out.gain.setValueAtTime(0.06, t + dur * 0.6);
+    out.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+    for (const [ff, q, a] of [[700, 5, 1], [1800, 7, 0.5]]) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = ff;
+      bp.Q.value = q;
+      const g = ctx.createGain();
+      g.gain.value = a;
+      o.connect(bp).connect(g).connect(out);
+    }
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = Math.random() * 1.2 - 0.6;
+    out.connect(pan).connect(this.master);
+    const send = ctx.createGain();
+    send.gain.value = 0.4;
+    out.connect(send).connect(this.reverb);
+    o.start(t);
+    vib.start(t);
+    o.stop(t + dur + 0.05);
+    vib.stop(t + dur + 0.05);
+  }
+
+  /** A flock bursting into the air: a flutter of wings and some alarmed chirps. */
+  flurry(amount = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + 0.01;
+    for (let i = 0; i < 10; i++) {
+      const at = t + i * 0.055 + Math.random() * 0.03;
+      this._noise(at, { type: 'bandpass', freq: 1400 + Math.random() * 900, Q: 1.5, env: [[0.01, 0.35], [0.05, 0]], vol: amount, pan: Math.random() * 1.4 - 0.7, reverb: 0.1 });
+    }
+    for (let i = 0; i < 2 + Math.round(amount * 3); i++) setTimeout(() => this._chirp(0.8 + amount), i * 140 + Math.random() * 80);
+  }
+
+  /** Brushing through a treetop. */
+  rustle(vol = 1) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime + 0.01;
+    this._noise(t, { type: 'highpass', freq: 2500, Q: 0.4, env: [[0.05, 0.3], [0.25, 0.2], [0.7, 0]], vol: Math.min(vol, 1.5), reverb: 0.2 });
+    this._noise(t, { type: 'bandpass', freq: 700, Q: 0.8, env: [[0.05, 0.3], [0.5, 0]], vol: Math.min(vol, 1.5) * 0.6, reverb: 0.1 });
   }
 
   // ---- Controls --------------------------------------------------------------

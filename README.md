@@ -28,6 +28,17 @@ Edits hot-reload in the browser. `window.sim` in the dev console exposes the fli
 | G | let a few hours pass (day → golden hour → sunset → night) |
 | M / N / P / H | sound / music / pause / help |
 
+### Bumping into things
+
+The world reacts when you fly close or straight into it:
+
+- **hot air balloons** pop in a shower of confetti. The envelope zips off like a let-go party balloon, and the basket (with its balloonist) drifts down on a parachute. A fresh balloon reinflates once you've flown off.
+- **houses and barns** burst into toy blocks. The plane ploughs through, a bit slower. After a while the blocks fly back into place and the house springs back up.
+- **the clock tower, lighthouse, windmill and giant tree trunk** are sturdy: you bonk off them as you would off a hillside.
+- **treetops** shake and shed leaves as you brush through them. The giant tree's canopy is one big leafy whoosh.
+- **flying low**, the prop wash sends rings rolling through the grass, crops and water, pushes the treetops aside, and kicks up petals over meadows or spray over water.
+- **sheep** bound away when you buzz them, **birds** scatter and regroup, **the windmill** spins up as you pass, and **clouds** part around you as you fly through (they drift back together slowly).
+
 ### On a phone or tablet
 
 Touch controls appear on the first touch (add `?touch` to the URL to try them with a mouse). Landscape is best; portrait works too.
@@ -41,6 +52,8 @@ Touch controls appear on the first touch (add `?touch` to the URL to try them wi
 ## Where things live
 
 - `src/touch.js`: phone/tablet controls: thumbstick, throttle lever, tilt steering, the ☰ menu. Dormant on desktop.
+- `src/world/interactions.js`: the plane bumping into the world: smashing and rebuilding houses, sturdy landmarks, brushing treetops, and the prop wash (ripples, petals, spray). Balloons, sheep and birds react in `life.js`, clouds in `sky.js`.
+- `src/fx.js`: pooled effects: puffs, fluttering confetti/leaves, and toy-block debris that can fly back home.
 - `src/plane/flight.js`: flight model. All the feel is in `TUNING` at the top.
 - `src/plane/model.js`: the biplane, built from primitives. Colours in `PALETTE`.
 - `src/world/terrain.js`: island height function (`heightFn`), the painted per-pixel ground shader (including the wind waves rolling through grass and crops), airfield/lake/village placement (`WORLD`), and the river's waypoints (`RIVER`).

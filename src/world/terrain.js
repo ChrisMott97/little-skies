@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createNoise2D, fbm, smoothstep, lerp, clamp } from '../noise.js';
 import { landRamp, shared } from '../materials.js';
-import { GLSL_NOISE } from '../glsl.js';
+import { GLSL_NOISE, GLSL_WASH } from '../glsl.js';
 import { planRiver, smoothPath, buildRiver, bakeRiverMap } from './river.js';
 
 // ---- World layout constants (tweak freely) ---------------------------------
@@ -195,6 +195,8 @@ export function createTerrain(featureTex, region, sunDir) {
     uSkyRefl: { value: C('#d9ecf5') },
     uSunDir: { value: sunDir },
     uTime: shared.uTime,
+    uWash: shared.uWash,
+    uPlaneWash: shared.uPlaneWash,
     uFeatures: { value: featureTex },
     uSway: { value: featureTex.userData.sway },
     uRegion: { value: new THREE.Vector3(region.minX, region.minZ, region.size) },
@@ -243,7 +245,8 @@ export function createTerrain(featureTex, region, sunDir) {
          varying vec3 vWorldP;
          varying vec3 vWorldN;
          varying float vForest;
-         ${GLSL_NOISE}`
+         ${GLSL_NOISE}
+         ${GLSL_WASH}`
       )
       .replace(
         '#include <color_fragment>',
@@ -313,6 +316,9 @@ export function createTerrain(featureTex, region, sunDir) {
            float sheen = smoothstep(0.55, 0.95, wave) * gust + smoothstep(0.45, 0.8, streak) * gust * 0.5;
            sheen *= grassy;
            col = mix(col, col * vec3(1.12, 1.16, 1.0) + vec3(0.05, 0.05, 0.03), clamp(sheen, 0.0, 1.0) * 0.55);
+           // the plane's prop wash: rings rolling out through the grass, a swirl underneath
+           vec2 pw = propWash(p);
+           col = mix(col, col * vec3(1.2, 1.24, 1.05) + vec3(0.07, 0.07, 0.04), clamp(pw.x * 0.8 + pw.y * 0.9, 0.0, 1.0) * grassy * 0.75);
 
            // ---- the river, painted from its distance + flow map ----
            vec2 ruv = (p - uRiverB.xy) / uRiverB.zw;
@@ -338,6 +344,7 @@ export function createTerrain(featureTex, region, sunDir) {
                // soft cel ripples catching the sky
                float band = smoothstep(0.6, 0.64, rN) * (1.0 - smoothstep(0.7, 0.76, rN));
                wcol = mix(wcol, uSkyRefl, band * 0.4);
+               wcol = mix(wcol, uSkyRefl, clamp(pw.x * 0.8 + pw.y * 0.6, 0.0, 1.0) * 0.6); // prop-wash ripples
                // a pale lip where water meets the bank
                wcol = mix(wcol, uSkyRefl, smoothstep(-1.6, -0.2, gap) * 0.55);
                // white water where it tumbles

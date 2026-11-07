@@ -18,6 +18,8 @@ import { ChaseCamera } from './camera.js';
 import { Input } from './input.js';
 import { TouchControls } from './touch.js';
 import { Sound } from './audio.js';
+import { createFx } from './fx.js';
+import { createInteractions } from './world/interactions.js';
 
 // ---- Renderer -----------------------------------------------------------------
 // phones and tablets get a lighter render (post-processing at full Retina res is the main cost)
@@ -90,6 +92,8 @@ const traffic = createTraffic();
 scene.add(traffic);
 const boats = createBoats();
 scene.add(boats);
+const fx = createFx();
+scene.add(fx.group);
 const post = createPost(renderer, scene, camera);
 const day = createDayCycle({ scene, sun, hemi, sky, clouds, water, terrain, post, lamps: buildings.userData.lamps });
 
@@ -101,6 +105,43 @@ const chase = new ChaseCamera(camera);
 const input = new Input(canvas);
 const sound = new Sound();
 
+// ---- Bumping into things ------------------------------------------------------
+// what the plane hits tells us here, so we can shake the camera and say something nice
+const pick = (a) => a[Math.floor(Math.random() * a.length)];
+const SMASH_LINES = ['crumble! 🧱', 'oops, someone’s kitchen 🫖', 'sorry! 🙈', 'timber… er, bricks 🧱', 'that’ll buff out ✨'];
+const said = new Set();
+let lastQuip = -99;
+function quip(msg, { once, gap = 5 } = {}) {
+  if (once && said.has(once)) return;
+  if (t - lastQuip < gap) return;
+  if (once) said.add(once);
+  lastQuip = t;
+  toast(msg);
+}
+function emit(type, data = {}) {
+  if (type === 'smash') {
+    chase.bump(0.9);
+    quip(said.has('smash') ? pick(SMASH_LINES) : 'crumble! (it’ll tidy itself up) 🧱', { gap: 4 });
+    said.add('smash');
+  } else if (type === 'pop') {
+    chase.bump(0.4);
+    quip(said.has('pop') ? pick(['pop! 🎈', 'pfffrrrt 🎈', 'sorry, balloonist! 🪂']) : 'pop! (the balloonist has a parachute) 🪂', { gap: 2 });
+    said.add('pop');
+  } else if (type === 'rebuilt') {
+    quip('good as new ✨', { once: 'rebuilt', gap: 2 });
+  } else if (type === 'leaves') {
+    chase.bump(data.big ? 0.35 : 0.15);
+    if (data.big) quip('right through the big tree! 🍃', { once: 'canopy' });
+  } else if (type === 'sheep') {
+    quip('baa! 🐑', { once: 'sheep' });
+  } else if (type === 'birds') {
+    quip('sorry, birds 🐦', { once: 'birds' });
+  } else if (type === 'cloud') {
+    quip('into the clouds ☁️', { once: 'cloud', gap: 1 });
+  }
+}
+const play = { flight, fx, sound, emit };
+
 // ---- UI ---------------------------------------------------------------------
 const $ = (id) => document.getElementById(id);
 const ui = {
@@ -111,6 +152,7 @@ const ui = {
   toast: $('toast'),
   fade: $('fade'),
   title: $('title'),
+  mist: $('mist'),
 };
 let toastTimer;
 function toast(msg, ms = 2200) {
@@ -137,7 +179,8 @@ flight.onEvent = (type, data) => {
   if (type === 'crash') {
     touch.releaseThrottle();
     flash();
-    toast(data.kind === 'splash' ? 'splash! back to the airfield 💦' : 'bonk! back to the airfield 🌼');
+    if (data.what) toast(`bonk! the ${data.what} didn't budge 🌼`);
+    else toast(data.kind === 'splash' ? 'splash! back to the airfield 💦' : 'bonk! back to the airfield 🌼');
     chase.first = true;
   } else if (type === 'takeoff') {
     toast('up, up and away ☁️');
@@ -208,6 +251,7 @@ const actions = [
 for (const a of actions) input.on(a.key, a.run);
 
 const touch = new TouchControls({ actions, toast });
+const interactions = createInteractions({ flight, fx, sound, buildings, trees, emit });
 input.touch = touch;
 if (touchFirst) touch.activate();
 
@@ -247,11 +291,17 @@ function frame() {
     plane.position.copy(flight.position);
     plane.quaternion.copy(flight.quaternion);
     plane.userData.animate(dt, t, flight);
-    clouds.userData.update(dt);
+    interactions.update(dt, t);
+    clouds.userData.update(dt, play);
     airfield.userData.update(dt, t);
-    buildings.userData.update(dt, t);
-    balloons.userData.update(dt, t);
-    birds.userData.update(dt, t);
+    buildings.userData.update(dt, t, flight);
+    balloons.userData.update(dt, t, play);
+    birds.userData.update(dt, t, play);
+    countryside.userData.update(dt, t, play);
+    fx.update(dt, t);
+    const mist = clouds.userData.mist;
+    ui.mist.style.opacity = mist > 0.01 ? Math.min(mist * 1.1, 0.6).toFixed(3) : 0;
+    if (mist > 0.3) emit('cloud');
     smoke.userData.update(dt, t);
     traffic.userData.update(dt, t);
     boats.userData.update(dt, t);
@@ -292,5 +342,5 @@ requestAnimationFrame(() => {
 frame();
 
 // handy for tinkering from the dev console
-window.sim = { day, sound, scene, flight, plane, camera, renderer, chase, input, touch, LAYOUT, groundHeight, post };
+window.sim = { day, sound, scene, flight, plane, camera, renderer, chase, input, touch, LAYOUT, groundHeight, post, fx, interactions, balloons };
 console.log(`[sim] ${trees.userData.count} trees, ${LAYOUT.houses.length} houses, ${LAYOUT.fields.length} fields`, countryside.userData.counts, `${traffic.userData.count} vehicles, ${boats.userData.count} boats, ${LAYOUT.bridges.length} bridges`);

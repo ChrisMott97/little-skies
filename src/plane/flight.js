@@ -201,8 +201,8 @@ export class FlightModel {
     }
   }
 
-  crash(kind) {
-    this.onEvent('crash', { kind });
+  crash(kind, what) {
+    this.onEvent('crash', { kind, what });
     this.resetToRunway();
   }
 }

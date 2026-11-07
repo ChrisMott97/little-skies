@@ -107,6 +107,9 @@ function house(b, h, opts = {}) {
   const base = mat4(h.x, baseY, h.z, 0, h.rot, 0);
   const plinthH = baseY - lo + 1.5;
   part(b, BOX, m.stone, base, mat4(0, -plinthH / 2 + 0.05, 0, 0, 0, 0, w + 0.5, plinthH, d + 0.5));
+  // everything above the plinth can be knocked down (and put back)
+  const tag = {};
+  b.setTag(tag);
 
   // walls + gables + roof planes
   part(b, BOX, wall, base, mat4(0, H / 2, 0, 0, 0, 0, w, H, d));
@@ -123,13 +126,18 @@ function house(b, h, opts = {}) {
   part(b, BOX, roof, base, mat4(0, H + pitch + 0.12, 0, Math.PI / 4, 0, 0, w + over * 2 + 0.1, 0.4, 0.4));
 
   // chimney
+  let chimney = null;
   if (r() < 0.8) {
     const cx = (r() - 0.5) * w * 0.6;
     const cz = (r() < 0.5 ? -1 : 1) * d * 0.18;
     const top = H + pitch + 0.9;
     part(b, BOX, r() < 0.5 ? m.stoneDark : m.red, base, mat4(cx, top - 1.6, cz, 0, 0, 0, 0.8, 3.2, 0.8));
     part(b, BOX, m.stoneDark, base, mat4(cx, top, cz, 0, 0, 0, 1.0, 0.25, 1.0));
-    if (r() < 0.6) chimneys.push(new THREE.Vector3(cx, top + 0.3, cz).applyMatrix4(base));
+    chimney = { x: cx, z: cz, top };
+    if (r() < 0.6) {
+      chimney.smoke = new THREE.Vector3(cx, top + 0.3, cz).applyMatrix4(base);
+      chimneys.push(chimney.smoke);
+    }
   }
 
   // door (front is +Z)
@@ -165,6 +173,7 @@ function house(b, h, opts = {}) {
   }
 
   // the occasional storybook turret
+  let turret = null;
   if (opts.turret ?? r() < 0.13) {
     const tx = (r() < 0.5 ? -1 : 1) * w / 2;
     const tz = d / 2;
@@ -172,8 +181,28 @@ function house(b, h, opts = {}) {
     part(b, CYL, wall, base, mat4(tx, th / 2, tz, 0, 0, 0, 1.5, th, 1.5));
     part(b, new THREE.ConeGeometry(1.95, 3.6, 12), roof, base, mat4(tx, th + 1.8, tz));
     part(b, BOX, m.glass, base, mat4(tx, th - 1.2, tz + 1.45, 0, 0, 0, 0.6, 0.9, 0.1));
+    turret = { x: tx, z: tz, h: th + 3.6 };
   }
-  return base;
+  b.untag();
+  return {
+    kind: 'house',
+    tag,
+    x: h.x,
+    z: h.z,
+    rot: h.rot,
+    baseY,
+    groundY: lo,
+    hw: w / 2,
+    hd: d / 2,
+    ox: 0,
+    walls: H,
+    top: H + pitch,
+    pitch,
+    floors,
+    chimney,
+    turret,
+    colours: { wall: '#' + wall.color.getHexString(), roof: '#' + roof.color.getHexString(), shutter: '#' + shutter.color.getHexString() },
+  };
 }
 
 // ---- Village -----------------------------------------------------------------
@@ -309,7 +338,22 @@ function createWindmill() {
   // face the sails roughly toward the airfield so you see them turning on takeoff
   group.position.set(W.x, W.y - 0.3, W.z);
   group.rotation.y = Math.atan2(WORLD.airfield.x - W.x, WORLD.airfield.z - W.z);
-  group.userData.update = (dt) => (sails.rotation.z -= dt * 0.6);
+  group.updateMatrixWorld(true);
+  const hub = sails.getWorldPosition(new THREE.Vector3());
+  const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(group.quaternion);
+  // fly past close and the sails catch your prop wash, then slowly wind down
+  let spin = 0.6;
+  group.userData.update = (dt, t, flight) => {
+    if (flight) {
+      const d = flight.position.distanceTo(hub);
+      const gust = Math.max(0, 1 - d / 70) * Math.min(flight.speed / 30, 1.5);
+      spin += gust * 6 * dt;
+    }
+    spin = Math.min(0.6 + (spin - 0.6) * Math.exp(-0.25 * dt), 9);
+    sails.rotation.z -= dt * spin;
+  };
+  group.userData.solid = { x: W.x, z: W.z, r: 4.4, bottom: W.y - 2, top: W.y + 19.5, name: 'windmill' };
+  group.userData.sails = { hub, facing, r: 12.5 };
   return group;
 }
 
@@ -335,7 +379,11 @@ function createLighthouse(b) {
   part(b, BOX, m.darkWood, base, mat4(0, 3.2, 3.15, 0, 0, 0, 1.2, 2.2, 0.2));
   // keeper's cottage
   const a = Math.atan2(LAYOUT.plaza.x - L.x, LAYOUT.plaza.z - L.z);
-  house(b, { x: L.x + Math.sin(a) * 11, z: L.z + Math.cos(a) * 11, rot: a, seed: 0.42 }, { w: 6, d: 5, floors: 1, wall: m.walls[0], roof: m.roofs[3] });
+  const cottage = house(b, { x: L.x + Math.sin(a) * 11, z: L.z + Math.cos(a) * 11, rot: a, seed: 0.42 }, { w: 6, d: 5, floors: 1, wall: m.walls[0], roof: m.roofs[3] });
+  return {
+    cottage,
+    solid: { x: L.x, z: L.z, r: 3.4, bottom: L.y - 2, top: L.y + 25.5, name: 'lighthouse' },
+  };
 }
 
 function barn(b, x, z, rot) {
@@ -345,6 +393,8 @@ function barn(b, x, z, rot) {
   const w = 12;
   const d = 9;
   part(b, BOX, m.stone, base, mat4(0, -0.8, 0, 0, 0, 0, w + 0.4, 2.2, d + 0.4));
+  const tag = {};
+  b.setTag(tag);
   part(b, BOX, m.barn, base, mat4(0, 2.6, 0, 0, 0, 0, w, 5.2, d));
   // gambrel roof profile
   const s = new THREE.Shape();
@@ -366,6 +416,25 @@ function barn(b, x, z, rot) {
   // silo
   part(b, CYL, m.walls[3], base, mat4(w / 2 + 3, 5, -1, 0, 0, 0, 2.2, 10, 2.2));
   part(b, new THREE.SphereGeometry(2.25, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), m.roofs[2], base, mat4(w / 2 + 3, 10, -1));
+  b.untag();
+  return {
+    kind: 'barn',
+    tag,
+    x,
+    z,
+    rot,
+    baseY: y + 0.2,
+    groundY: y - 1,
+    hw: (w / 2 + 5.2 + w / 2) / 2, // the box reaches over the silo too
+    hd: d / 2 + 0.5,
+    ox: 2.6,
+    walls: 5.2,
+    top: 9.4,
+    pitch: 4.2,
+    floors: 2,
+    silo: { x: w / 2 + 3, z: -1, r: 2.2, h: 10 },
+    colours: { wall: '#' + m.barn.color.getHexString(), roof: '#' + m.roofs[3].color.getHexString(), shutter: '#' + m.white.color.getHexString(), silo: '#' + m.walls[3].color.getHexString() },
+  };
 }
 
 function createGiantTree() {
@@ -423,6 +492,8 @@ function createGiantTree() {
 
   const g = b.build({ outline: 0.08 });
   g.position.set(T.x, T.y - 0.6, T.z);
+  g.userData.solid = { x: T.x, z: T.z, r: 3.4, bottom: T.y - 2, top: T.y + 19, name: 'giant tree' };
+  g.userData.canopy = { p: new THREE.Vector3(T.x, T.y + 27, T.z), r: 17, colours: ['#6aa84f', '#7fb85a', '#9ccb5e'] };
   return g;
 }
 
@@ -539,31 +610,47 @@ export function createBuildings() {
   const updates = [];
 
   const village = new MergeBuilder();
-  for (const h of LAYOUT.houses) house(village, h);
+  const breakables = LAYOUT.houses.map((h) => house(village, h));
   clockTower(village);
   const lamps = streetLamps(village);
   laundryLines(village);
-  createLighthouse(village);
+  const lighthouse = createLighthouse(village);
+  breakables.push(lighthouse.cottage);
   for (const br of LAYOUT.bridges) bridge(village, br);
 
   // farms: a farmhouse + barn at each
   LAYOUT.farms.forEach((f, i) => {
     const rot = Math.atan2(WORLD.airfield.x - f.x, WORLD.airfield.z - f.z);
-    house(village, { x: f.x + Math.cos(rot) * 14, z: f.z - Math.sin(rot) * 14, rot, seed: 0.13 + i * 0.31 }, { floors: 2 });
-    barn(village, f.x - Math.cos(rot) * 10, f.z + Math.sin(rot) * 10, rot);
+    breakables.push(house(village, { x: f.x + Math.cos(rot) * 14, z: f.z - Math.sin(rot) * 14, rot, seed: 0.13 + i * 0.31 }, { floors: 2 }));
+    breakables.push(barn(village, f.x - Math.cos(rot) * 10, f.z + Math.sin(rot) * 10, rot));
   });
 
   group.add(village.build({ outline: 0.06 }));
+  // where each breakable building lives inside the merged village meshes
+  for (const b of breakables) b.ranges = village.ranges(b.tag);
 
   const windmill = createWindmill();
   group.add(windmill);
   updates.push(windmill.userData.update);
-  group.add(createGiantTree());
+  const giantTree = createGiantTree();
+  group.add(giantTree);
   const pier = createPier();
   group.add(pier);
   if (pier.userData.update) updates.push(pier.userData.update);
 
   group.userData.lamps = lamps;
-  group.userData.update = (dt, t) => updates.forEach((u) => u(dt, t));
+  group.userData.breakables = breakables;
+  // things that stay put when you fly into them (you bonk off instead)
+  const P = LAYOUT.plaza;
+  const plazaY = groundHeight(P.x, P.z);
+  group.userData.solids = [
+    { x: P.x, z: P.z, r: 3.6, bottom: plazaY - 2, top: plazaY + 26.5, name: 'clock tower' },
+    lighthouse.solid,
+    windmill.userData.solid,
+    giantTree.userData.solid,
+  ];
+  group.userData.sails = windmill.userData.sails;
+  group.userData.canopy = giantTree.userData.canopy;
+  group.userData.update = (dt, t, flight) => updates.forEach((u) => u(dt, t, flight));
   return group;
 }

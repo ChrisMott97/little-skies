@@ -93,7 +93,7 @@ export function createClouds(sunDir, { count = 70, area = 9000 } = {}) {
       const centreness = 1 - rr;
       const r = (22 + rand() * 22 + centreness * 30) * size;
       const oy = r * 0.35 + centreness * centreness * (tower ? 170 : 70) * size;
-      puffs.push({ cloud: c, ox, oy, oz, r, base });
+      puffs.push({ cloud: c, ox, oy, oz, r, base, dx: 0, dy: 0, dz: 0 });
     }
     cloud.end = puffs.length;
     clouds.push(cloud);
@@ -175,26 +175,58 @@ export function createClouds(sunDir, { count = 70, area = 9000 } = {}) {
   let drift = 0;
   const half = area / 2;
 
-  function layout() {
+  const away = new THREE.Vector3();
+  /** Lay the puffs out; fly through one and it's nudged aside (and slowly drifts back). Returns how deep in cloud P is. */
+  function layout(dt = 0, P = null) {
+    let inside = 0;
+    const heal = Math.exp(-dt / 30);
     for (const c of clouds) {
       // wrap each cloud as a unit so it drifts across forever
       let x = c.x + drift;
       x = ((x + half) % area + area) % area - half;
+      const near = P && Math.abs(x - P.x) < 400 && Math.abs(c.z - P.z) < 300;
       for (let i = c.start; i < c.end; i++) {
         const p = puffs[i];
-        pos.set(x + p.ox, p.base + p.oy, c.z + p.oz);
+        if (p.dx || p.dy || p.dz) {
+          p.dx *= heal;
+          p.dy *= heal;
+          p.dz *= heal;
+        }
+        pos.set(x + p.ox + p.dx, p.base + p.oy + p.dy, c.z + p.oz + p.dz);
+        if (near) {
+          away.subVectors(pos, P);
+          away.y /= 0.85;
+          const d = away.length();
+          const reach = p.r + 6;
+          if (d < reach) {
+            inside = Math.max(inside, 1 - d / reach);
+            away.normalize().multiplyScalar(Math.min((reach - d) * 1.5, 30) * dt);
+            p.dx += away.x;
+            p.dy += away.y;
+            p.dz += away.z;
+          }
+        }
         s.set(p.r, p.r * 0.85, p.r);
         m4.compose(pos, q, s);
         mesh.setMatrixAt(i, m4);
       }
     }
     mesh.instanceMatrix.needsUpdate = true;
+    return inside;
   }
   layout();
 
-  mesh.userData.update = (dt) => {
+  mesh.userData.mist = 0;
+  mesh.userData.update = (dt, play) => {
     drift += dt * 4; // gentle breeze, metres per second
-    layout();
+    const inside = layout(dt, play?.flight.position);
+    mesh.userData.mist += (inside - mesh.userData.mist) * Math.min(1, dt * 4);
+    // wisps streaming past while you're in the soup
+    if (play && inside > 0.15 && Math.random() < dt * 30 * inside) {
+      const P = play.flight.position;
+      away.randomDirection().multiplyScalar(6).add(P).addScaledVector(play.flight.velocity, 0.4);
+      play.fx.puff(away, { n: 1, colour: ['#ffffff', '#eef3fb'], size: 3 + inside * 3, speed: 1, life: 0.9, rise: 0 });
+    }
   };
   return mesh;
 }
