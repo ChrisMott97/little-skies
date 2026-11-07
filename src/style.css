@@ -84,3 +84,118 @@ kbd {
   box-shadow: 0 6px 24px rgba(74, 59, 63, 0.15);
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---- Touch screens (body.touch is added by touch.js on the first touch) ----------------- */
+#scene { touch-action: none; }
+.touch-only, #touch { display: none; }
+body.touch .desk-only, body.touch #help { display: none; }
+body.touch .touch-only { display: block; }
+body.touch #touch { display: block; }
+body.touch { touch-action: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+
+:root {
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+}
+
+/* compact HUD tucked into the top-left, away from the thumbs */
+body.touch #hud {
+  left: calc(12px + var(--safe-l)); top: calc(10px + var(--safe-t)); bottom: auto;
+  min-width: 0; padding: 6px 14px; display: flex; gap: 14px; font-size: 12px; border-radius: 14px;
+  pointer-events: none;
+}
+body.touch #hud .row { margin: 0; gap: 4px; }
+body.touch #hud .row span { width: auto; }
+body.touch #hud .row b { font-size: 17px; min-width: 0; }
+body.touch #hud .row:last-child { display: none; } /* the lever shows the throttle */
+body.touch #toast { top: calc(12px + var(--safe-t)); max-width: calc(100vw - 32px); text-align: center; }
+body.touch #title { top: calc(6vh + var(--safe-t)); padding: 0 16px; }
+body.touch #title h1 { font-size: clamp(34px, 9vmin, 56px); }
+body.touch #title p { font-size: 14px; }
+
+#touch .zone { position: fixed; bottom: 0; touch-action: none; }
+#touch .lever-zone { left: 0; width: min(34vw, 260px); height: 70%; }
+#touch .stick-zone { right: 0; width: 48vw; height: 70%; }
+
+/* throttle lever */
+#touch .lever {
+  position: absolute; left: calc(30px + var(--safe-l)); bottom: calc(46px + var(--safe-b));
+  width: 46px; height: min(170px, 44vh); border-radius: 23px;
+  background: rgba(255, 250, 238, 0.45); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 6px 24px rgba(74, 59, 63, 0.15), inset 0 0 0 2px rgba(255,255,255,0.7);
+  overflow: visible;
+}
+#touch .lever-fill {
+  position: absolute; left: 8px; right: 8px; bottom: 8px; max-height: calc(100% - 16px);
+  border-radius: 15px; background: linear-gradient(0deg, var(--teal), var(--accent)); opacity: 0.75;
+}
+#touch .lever-knob {
+  position: absolute; left: -9px; right: -9px; height: 26px; margin-bottom: -13px;
+  border-radius: 13px; background: #fffaf0;
+  box-shadow: 0 3px 10px rgba(74, 59, 63, 0.3), inset 0 -3px 0 rgba(74,59,63,0.12);
+  transition: transform .15s ease;
+}
+#touch .lever-zone.held .lever-knob { transform: scale(1.12); }
+#touch .lever-label {
+  position: absolute; left: calc(20px + var(--safe-l)); bottom: calc(6px + var(--safe-b)); width: 66px;
+  text-align: center; font-size: 11px; font-weight: 600; color: #fffaf0; opacity: 0.85;
+  text-shadow: 0 1px 4px rgba(74,59,63,0.5);
+}
+
+/* thumbstick: rests in the corner, jumps to wherever your thumb lands */
+#touch .stick-base {
+  position: absolute; width: 128px; height: 128px; margin: -64px 0 0 -64px; border-radius: 50%;
+  background: rgba(255, 250, 238, 0.32); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  box-shadow: 0 6px 24px rgba(74, 59, 63, 0.12), inset 0 0 0 2px rgba(255,255,255,0.7);
+  display: grid; place-items: center; pointer-events: none;
+}
+#touch .stick-base.rest {
+  left: auto; top: auto; margin: 0;
+  right: calc(36px + var(--safe-r)); bottom: calc(30px + var(--safe-b)); opacity: 0.75;
+}
+#touch .stick-knob {
+  width: 58px; height: 58px; border-radius: 50%; background: #fffaf0;
+  box-shadow: 0 4px 12px rgba(74, 59, 63, 0.3), inset 0 -3px 0 rgba(74,59,63,0.12);
+}
+#touch.tilting .stick-base.rest { opacity: 0.45; }
+
+/* top-right buttons + menu */
+#touch .touch-buttons {
+  position: fixed; top: calc(10px + var(--safe-t)); right: calc(12px + var(--safe-r));
+  display: flex; gap: 8px;
+}
+#touch .touch-btn {
+  height: 42px; min-width: 42px; padding: 0 12px; border: 0; border-radius: 21px;
+  font: inherit; font-size: 15px; font-weight: 700; color: var(--ink);
+  background: var(--paper); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(74, 59, 63, 0.15), inset 0 0 0 2px rgba(255,255,255,0.6);
+}
+#touch .touch-btn.on { background: var(--teal); color: #fffaf0; }
+#touch .recentre-btn { display: none; }
+#touch.tilting .recentre-btn { display: block; }
+
+#touch .touch-menu {
+  top: calc(60px + var(--safe-t)); right: calc(12px + var(--safe-r));
+  display: grid; grid-template-columns: repeat(3, auto); gap: 6px; padding: 10px;
+  max-height: calc(100% - 76px - var(--safe-t)); overflow-y: auto; touch-action: pan-y;
+  opacity: 0; transform: translateY(-8px); pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+#touch .touch-menu.open { opacity: 1; transform: none; pointer-events: auto; }
+#touch .touch-menu button {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  min-width: 78px; padding: 8px 6px; border: 0; border-radius: 12px;
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--ink); background: rgba(255,255,255,0.6);
+}
+#touch .touch-menu button span { font-size: 20px; }
+#touch .touch-menu button:active { background: #fff; }
+
+@media (orientation: portrait) {
+  /* narrow screen: toast and title drop below the HUD / button row */
+  body.touch #toast { top: calc(62px + var(--safe-t)); }
+  body.touch #title { top: calc(120px + var(--safe-t)); }
+  #touch .lever-zone { width: 42vw; height: 45%; }
+  #touch .stick-zone { width: 58vw; height: 45%; }
+}
