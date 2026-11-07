@@ -205,3 +205,50 @@ body.touch #title p { font-size: 14px; }
   #touch .lever-zone { width: 42vw; height: 45%; }
   #touch .stick-zone { width: 58vw; height: 45%; }
 }
+
+/* ---- Loading / title card ------------------------------------------------------------------
+   Sits over everything until the world is built and the shaders are warm, then waits for a
+   tap/click (which is also what lets the browser start the sound). The clouds only animate
+   transform, so they keep drifting even while the main thread is busy building the world. */
+#loader {
+  position: fixed; inset: 0; z-index: 50; overflow: hidden;
+  display: grid; place-items: center;
+  background: linear-gradient(180deg, #7fb6e0 0%, #a9d1ec 45%, #dcebf0 78%, #f6e7c9 100%);
+  transition: opacity 1.4s ease;
+  touch-action: none;
+}
+#loader.ready { cursor: pointer; }
+#loader.gone { opacity: 0; pointer-events: none; }
+.loader-card { position: relative; text-align: center; padding: 0 24px; }
+.loader-card h1 {
+  margin: 0; font-size: clamp(40px, 11vmin, 76px); letter-spacing: 1px; font-weight: 800; color: #fffaf0;
+  text-shadow: 0 3px 0 var(--accent), 0 6px 22px rgba(74,59,63,0.35);
+}
+#loader-status { margin: 14px 0 0; font-size: 15px; font-weight: 600; opacity: 0.75; min-height: 1.3em; }
+#loader .loader-go { display: none !important; }
+#loader.ready #loader-status { display: none; }
+#loader.ready .loader-go {
+  margin: 14px 0 0; font-size: 17px; font-weight: 700;
+  animation: loader-breathe 2.4s ease-in-out infinite;
+}
+body:not(.touch) #loader.ready .loader-go.desk-only,
+body.touch #loader.ready .loader-go.touch-only { display: block !important; }
+@keyframes loader-breathe { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+.loader-clouds i {
+  position: absolute; left: 0; display: block; border-radius: 999px; background: #fffaf3;
+  box-shadow: inset 0 -10px 18px rgba(150, 170, 200, 0.35);
+  will-change: transform;
+  animation: loader-drift linear infinite;
+}
+.loader-clouds i::before, .loader-clouds i::after {
+  content: ''; position: absolute; border-radius: 50%; background: inherit;
+}
+.loader-clouds i::before { width: 55%; height: 140%; left: 14%; bottom: 20%; }
+.loader-clouds i::after { width: 38%; height: 110%; left: 50%; bottom: 25%; }
+.loader-clouds i:nth-child(1) { top: 14%; width: 180px; height: 44px; animation-duration: 46s; animation-delay: -10s; }
+.loader-clouds i:nth-child(2) { top: 26%; width: 120px; height: 30px; animation-duration: 62s; animation-delay: -40s; opacity: 0.85; }
+.loader-clouds i:nth-child(3) { top: 70%; width: 220px; height: 52px; animation-duration: 54s; animation-delay: -25s; }
+.loader-clouds i:nth-child(4) { top: 78%; width: 150px; height: 36px; animation-duration: 70s; animation-delay: -5s; opacity: 0.9; }
+.loader-clouds i:nth-child(5) { top: 90%; width: 90px; height: 24px; animation-duration: 80s; animation-delay: -60s; opacity: 0.7; }
+@keyframes loader-drift { from { transform: translateX(-260px); } to { transform: translateX(calc(100vw + 40px)); } }

@@ -21,6 +21,25 @@ import { Sound } from './audio.js';
 import { createFx } from './fx.js';
 import { createInteractions } from './world/interactions.js';
 
+// ---- Loading card ---------------------------------------------------------------
+// Building the world is one long synchronous job, so we pause between the big pieces to let
+// the loading card repaint with a new line (the clouds on it drift regardless).
+const loaderStatus = document.getElementById('loader-status');
+const nextPaint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+async function step(line) {
+  loaderStatus.textContent = line;
+  await nextPaint();
+}
+// keys stay with the card until it's gone, so nothing moves the plane behind it
+let onLoaderKey = null;
+function swallowKeys(e) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  e.stopImmediatePropagation();
+  e.preventDefault();
+  if (!e.repeat) onLoaderKey?.(e);
+}
+window.addEventListener('keydown', swallowKeys, true);
+
 // ---- Renderer -----------------------------------------------------------------
 // phones and tablets get a lighter render (post-processing at full Retina res is the main cost)
 const touchFirst = matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch');
@@ -65,6 +84,7 @@ sun.shadow.normalBias = 0.6;
 scene.add(sun, sun.target);
 
 // ---- World ------------------------------------------------------------------
+await step('painting the hills…');
 const sky = createSky(sunDir);
 scene.add(sky);
 const terrain = createTerrain(paintFeatures(), REGION, sunDir);
@@ -73,13 +93,16 @@ const water = createWater(sunDir);
 scene.add(water);
 const clouds = createClouds(sunDir);
 scene.add(clouds);
+await step('planting trees…');
 const trees = createTrees();
 scene.add(trees);
 scene.add(createFlowers());
+await step('building the village…');
 const airfield = createAirfield();
 scene.add(airfield);
 const buildings = createBuildings();
 scene.add(buildings);
+await step('herding sheep…');
 const countryside = createCountryside();
 scene.add(countryside);
 const balloons = createBalloons();
@@ -335,11 +358,32 @@ function frame() {
   requestAnimationFrame(frame);
 }
 
-// fade in once the first frame is ready
-requestAnimationFrame(() => {
-  ui.fade.style.opacity = 0;
-});
+// warm up every shader now (behind the card) rather than stuttering on the first frame
+await step('warming up the engine…');
+try {
+  await renderer.compileAsync(scene, camera);
+} catch (e) {
+  console.warn('[sim] shader warm-up skipped', e);
+}
+ui.fade.style.opacity = 0;
 frame();
+
+// first frame is out: wait for a tap / click / key. That gesture is also what lets the
+// browser (especially iOS Safari) start the sound.
+await nextPaint();
+const loader = document.getElementById('loader');
+loader.classList.add('ready');
+const go = () => {
+  window.removeEventListener('keydown', swallowKeys, true);
+  loader.removeEventListener('pointerup', go);
+  sound.start();
+  if (sound.ctx?.state !== 'running') sound.ctx?.resume();
+  document.body.classList.add('started');
+  loader.classList.add('gone');
+  setTimeout(() => loader.remove(), 1600);
+};
+onLoaderKey = go;
+loader.addEventListener('pointerup', go);
 
 // handy for tinkering from the dev console
 window.sim = { day, sound, scene, flight, plane, camera, renderer, chase, input, touch, LAYOUT, groundHeight, post, fx, interactions, balloons };

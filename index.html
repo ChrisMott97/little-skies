@@ -11,6 +11,19 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <script>
+      // before anything paints: pick the touch UI on phones/tablets so the desktop one never flashes,
+      // and show any start-up error on the loading card instead of leaving it hanging
+      if (matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch')) {
+        document.body.classList.add('touch');
+      }
+      const startFailed = (msg) => {
+        const s = document.getElementById('loader-status');
+        if (s && !document.body.classList.contains('started')) s.textContent = 'oh no, it couldn’t start: ' + (msg || 'unknown error');
+      };
+      window.addEventListener('error', (e) => startFailed(e.message));
+      window.addEventListener('unhandledrejection', (e) => startFailed(e.reason?.message || String(e.reason)));
+    </script>
     <canvas id="scene"></canvas>
     <div id="vignette"></div>
     <div id="grain"></div>
@@ -45,6 +58,16 @@
         <li><kbd>G</kbd> let a few hours pass</li>
         <li><kbd>M</kbd> sound · <kbd>N</kbd> music · <kbd>P</kbd> pause · <kbd>H</kbd> hide this</li>
       </ul>
+    </div>
+
+    <div id="loader">
+      <div class="loader-clouds" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="loader-card">
+        <h1>little skies</h1>
+        <p id="loader-status">unfolding the map…</p>
+        <p class="loader-go desk-only">click or press any key to fly</p>
+        <p class="loader-go touch-only">tap to fly</p>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>
